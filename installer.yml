@@ -1,0 +1,76 @@
+---
+- name: Setup Kubernetes Control Node
+  hosts: all
+  become: true
+  tasks:
+    - name: Set hostname
+      shell: hostnamectl set-hostname "{{ inventory_hostname }}"
+
+    - name: Update /etc/hosts with predefined Kubernetes nodes
+      shell: |
+        if ! grep -q "{{ item }}" /etc/hosts; then
+          echo "{{ item }}" >> /etc/hosts
+        fi
+      loop:
+        - "192.168.10.160 k8scontrol"
+        - "192.168.10.161 k8snode1"
+        - "192.168.10.162 k8snode2"
+        - "192.168.10.164 k8snode3"
+
+    - name: Disable swap
+      shell: swapoff -a
+      args:
+        warn: false
+
+    - name: Remove swap file from fstab
+      shell: sed -i '/swap/d' /etc/fstab
+
+    - name: Enable required kernel modules
+      shell: |
+        echo "overlay" >> /etc/modules-load.d/containerd.conf
+        echo "br_netfilter" >> /etc/modules-load.d/containerd.conf
+        modprobe overlay
+        modprobe br_netfilter
+
+    - name: Configure sysctl for Kubernetes
+      shell: |
+        cat <<EOF > /etc/sysctl.d/kubernetes.conf
+        net.bridge.bridge-nf-call-ip6tables = 1
+        net.bridge.bridge-nf-call-iptables = 1
+        net.ipv4.ip_forward = 1
+        EOF
+        sysctl --system
+
+    - name: Install required packages
+      shell: |
+        apt-get update
+        apt-get install -y curl gnupg2 software-properties-common apt-transport-https ca-certificates
+
+    - name: Add Docker GPG key with automatic confirmation
+      shell: curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
+
+    - name: Add Docker repository with automatic confirmation
+      shell: |
+        yes | printf "\n" | add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+
+    - name: Install containerd with automatic confirmation
+      shell: |
+        yes | apt-get install -y containerd.io
+
+    - name: Configure containerd
+      shell: |
+        containerd config default > /etc/containerd/config.toml
+        sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+        systemctl restart containerd
+        systemctl enable containerd
+
+    - name: Add Kubernetes repository with automatic confirmation
+      shell: |
+        yes | echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
+        yes | curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+    - name: Install Kubernetes components with automatic confirmation
+      shell: |
+        yes | apt-get update
+        yes | apt-get install -y kubelet kubeadm kubectl
+        apt-mark hold kubelet kubeadm kubectl
