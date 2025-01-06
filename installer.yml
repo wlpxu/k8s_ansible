@@ -1,22 +1,7 @@
----
-- name: Setup Kubernetes Control Node
+- name: Setup Kubernetes Cluster
   hosts: all
   become: true
   tasks:
-    - name: Set hostname
-      shell: hostnamectl set-hostname "{{ inventory_hostname }}"
-
-    - name: Update /etc/hosts with predefined Kubernetes nodes
-      shell: |
-        if ! grep -q "{{ item }}" /etc/hosts; then
-          echo "{{ item }}" >> /etc/hosts
-        fi
-      loop:
-        - "192.168.10.160 k8scontrol"
-        - "192.168.10.161 k8snode1"
-        - "192.168.10.162 k8snode2"
-        - "192.168.10.164 k8snode3"
-
     - name: Disable swap
       shell: swapoff -a
       args:
@@ -74,3 +59,49 @@
         yes | apt-get update
         yes | apt-get install -y kubelet kubeadm kubectl
         apt-mark hold kubelet kubeadm kubectl
+
+- name: Setup Kubernetes Master Nodes
+  hosts: masters
+  become: true
+  tasks:
+    - name: Install Kubernetes Master Node components
+      apt:
+        name:
+          - kubeadm
+          - kubectl
+        state: present
+        update_cache: true
+
+- name: Setup Kubernetes Worker Nodes
+  hosts: workers
+  become: true
+  tasks:
+    - name: Install Kubernetes Worker Node components
+      apt:
+        name:
+          - kubelet
+        state: present
+        update_cache: true
+
+- name: Generate and use Kubernetes join command
+  hosts: masters
+  become: true
+  tasks:
+    - name: Generate kubeadm join command
+      shell: kubeadm token create --print-join-command
+      register: join_command
+      delegate_to: localhost
+
+    - name: Display the join command for debugging
+      debug:
+        msg: "{{ join_command.stdout }}"
+
+    - name: Save the join command for workers
+      set_fact:
+        kubeadm_join_command: "{{ join_command.stdout }}"
+
+- name: Join worker nodes to Kubernetes cluster
+  hosts: workers
+  become: true
+  tasks:
+    - name: Join the node to the Kubernetes cluster
