@@ -1,0 +1,38 @@
+#kube #ansible 
+- name: Install Kubernetes on specified nodes
+  hosts: localhost
+  gather_facts: no
+  vars_prompt:
+    - name: "master_ip"
+      prompt: "Введите IP-адрес мастера (k8scontrol)"
+      private: false
+
+    - name: "worker_ips"
+      prompt: "Введите IP-адреса воркеров через запятую (например, 192.168.10.161,192.168.10.162)"
+      private: false
+
+    - name: "ssh_key_path"
+      prompt: "Введите путь к приватному SSH-ключу (например, ~/.ssh/id_rsa)"
+      private: false
+
+  tasks:
+    - name: Convert worker IPs to list
+      ansible.builtin.set_fact:
+        worker_list: "{{ worker_ips.split(',') }}"
+
+    - name: Generate inventory file
+      ansible.builtin.copy:
+        dest: "./inventory.ini"
+        content: |
+          [masters]
+          k8scontrol ansible_host={{ master_ip }} ansible_ssh_private_key_file={{ ssh_key_path }}
+
+          [workers]
+          {% for worker in worker_list %}
+          k8snode{{ loop.index }} ansible_host={{ worker }} ansible_ssh_private_key_file={{ ssh_key_path }}
+          {% endfor %}
+
+    - name: Run Kubernetes installation playbook
+      ansible.builtin.command:
+        cmd: "ansible-playbook -i inventory.ini installer3.yml"
+inventory.yml
