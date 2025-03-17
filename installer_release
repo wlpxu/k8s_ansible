@@ -1,11 +1,10 @@
+#kube #ansible 
 - name: Setup Kubernetes Cluster
   hosts: all
   become: true
   tasks:
     - name: Disable swap
       shell: swapoff -a
-      args:
-        warn: false
 
     - name: Remove swap file from fstab
       shell: sed -i '/swap/d' /etc/fstab
@@ -31,16 +30,15 @@
         apt-get update
         apt-get install -y curl gnupg2 software-properties-common apt-transport-https ca-certificates
 
-    - name: Add Docker GPG key with automatic confirmation
+    - name: Add Docker GPG key
       shell: curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
 
-    - name: Add Docker repository with automatic confirmation
+    - name: Add Docker repository
       shell: |
         yes | printf "\n" | add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
 
-    - name: Install containerd with automatic confirmation
-      shell: |
-        yes | apt-get install -y containerd.io
+    - name: Install containerd
+      shell: apt-get install -y containerd.io
 
     - name: Configure containerd
       shell: |
@@ -49,29 +47,22 @@
         systemctl restart containerd
         systemctl enable containerd
 
-    - name: Add Kubernetes repository with automatic confirmation
+    - name: Add Kubernetes repository
       shell: |
-        yes | echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
-        yes | curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        mkdir -p /etc/apt/keyrings
+        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
 
-    - name: Install Kubernetes components with automatic confirmation
+    - name: Install Kubernetes components
       shell: |
-        yes | apt-get update
-        yes | apt-get install -y kubelet kubeadm kubectl
+        apt-get update
+        apt-get install -y kubelet kubeadm kubectl
         apt-mark hold kubelet kubeadm kubectl
 
 - name: Setup Kubernetes Master Nodes
   hosts: masters
   become: true
   tasks:
-    - name: Install Kubernetes Master Node components
-      apt:
-        name:
-          - kubeadm
-          - kubectl
-        state: present
-        update_cache: true
-
     - name: Initialize Kubernetes master
       shell: kubeadm init --pod-network-cidr=192.168.0.0/16
       args:
@@ -85,7 +76,6 @@
         chown $(id -u):$(id -g) $HOME/.kube/config
       args:
         executable: /bin/bash
-
 
 - name: Setup Kubernetes Worker Nodes
   hosts: workers
@@ -106,10 +96,6 @@
       shell: kubeadm token create --print-join-command
       register: join_command
 
-    - name: Display the join command for debugging
-      debug:
-        msg: "{{ join_command.stdout }}"
-
     - name: Save the join command for workers
       set_fact:
         kubeadm_join_command: "{{ join_command.stdout }}"
@@ -122,8 +108,11 @@
       shell: "{{ hostvars[groups['masters'][0]].kubeadm_join_command }}"
       args:
         executable: /bin/bash
-- name: Install Calico network plugin master node
+
+- name: Install Calico network plugin on master node
   hosts: masters
+  become: true
+  tasks:
     - name: Install Calico network plugin
       shell: kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.29.1/manifests/calico.yaml
       args:
